@@ -23,7 +23,7 @@ ENIGMA_trace_norm(
   loss_his = TRUE,
   model_tracker = FALSE,
   model_name = NULL,
-  X_int = FALSE
+  X_int = NULL
 )
 }
 \arguments{

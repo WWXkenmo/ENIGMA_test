@@ -76,7 +76,7 @@
 #'
 #' @export
 #'
-ENIGMA_trace_norm <- function(object, theta, R, alpha=0.5,beta=1,tao_k=1,gamma=NULL,epsilon=NULL,max.iter=1000,solver = "admm",verbose=FALSE,pos=TRUE,Normalize=TRUE,Norm.method = "frac",preprocess = "log",loss_his=TRUE,model_tracker=FALSE,model_name = NULL,X_int=FALSE){
+ENIGMA_trace_norm <- function(object, theta, R, alpha=0.5,beta=1,tao_k=1,gamma=NULL,epsilon=NULL,max.iter=1000,solver = "admm",verbose=FALSE,pos=TRUE,Normalize=TRUE,Norm.method = "frac",preprocess = "log",loss_his=TRUE,model_tracker=FALSE,model_name = NULL,X_int=NULL){
     suppressPackageStartupMessages(require("scater"))
 	suppressPackageStartupMessages(require("preprocessCore"))
 	
@@ -93,10 +93,13 @@ ENIGMA_trace_norm <- function(object, theta, R, alpha=0.5,beta=1,tao_k=1,gamma=N
 	
     if(preprocess == "sqrt") O = sqrt(object@bulk)
 	if(preprocess == "log") O = log2(object@bulk+1)
+	if(preprocess == "none") O = object@bulk
 	
     theta = object@result_cell_proportion
 	if(preprocess == "sqrt") R = sqrt(object@ref)
 	if(preprocess == "log") R = log2(object@ref+1)
+	if(preprocess == "none") R = object@ref
+	
     # unify geneid between O and R
     geneid = intersect( rownames(O), rownames(R) )
     O = O[geneid,]
@@ -424,6 +427,40 @@ getX <- function(O,theta,R,A,Y,alpha,gamma){
     X_k
 }
 
+derive_P <- function(X, theta, P_old,R,alpha){
+    ## P_old: a tensor variable with three dimensions
+    ## theta: the cell type proportions variable
+    ## cell_type_index: optimize which type of cells
+    ## R: reference matrix
+    dP1 <- dP2 <- array(0,
+                        dim = c( nrow(X),
+                                 ncol(X),
+                                 ncol(theta)),
+                        dimnames = list( rownames(X),
+                                         colnames(X),
+                                         colnames(theta))
+    )
+    for(cell_type_index in 1:ncol(theta)){
+        R.m <- as.matrix(R[,cell_type_index])
+        
+        cell_type_seq <- c(1:ncol(theta))
+        cell_type_seq <- cell_type_seq[cell_type_seq!=cell_type_index]
+        
+        X_summary = Reduce("+",
+                           lapply(cell_type_seq, function(i) P_old[,,i]%*%diag(theta[,i]) )
+        )
+        X_summary <- X-X_summary
+        
+        dP1[,,cell_type_index] <- 2*(P_old[,,cell_type_index]%*%diag(theta[,cell_type_index]) - X_summary)%*%diag(theta[,cell_type_index])
+        dP2[,,cell_type_index] <- 2*(as.matrix(rowMeans(P_old[,,cell_type_index]))-R.m)%*%t(as.matrix(rep((1/ncol(dP2[,,cell_type_index])),ncol(dP2[,,cell_type_index]))))
+    }
+    
+    w1 <- alpha
+    w2 <- 1-w1
+    
+    dP <- dP1*as.numeric(w1) + dP2*as.numeric(w2)
+    return(dP)
+}
 
 #Using nuclear norm to regularize the object function
 getF <- function(theta,alpha,gamma,a){

@@ -79,11 +79,12 @@ ENIGMA_L2_max_norm <- function(object, alpha=0.5, tao_k=0.01, beta=0.1, epsilon=
 	
     if(preprocess == "sqrt") X = sqrt(object@bulk)
 	if(preprocess == "log") X = log2(object@bulk+1)
+	if(preprocess == "none") X = object@bulk
 	
     theta = object@result_cell_proportion
 	if(preprocess == "sqrt") R = sqrt(object@ref)
 	if(preprocess == "log") R = log2(object@ref+1)
-	
+	if(preprocess == "none") R = object@ref
 	
     # unify geneid between X and R
     geneid = intersect( rownames(X), rownames(R) )
