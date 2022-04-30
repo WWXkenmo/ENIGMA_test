@@ -43,10 +43,7 @@ FindCSE_DEG <- function(object,y,FDR_control = TRUE,covariate=NULL,FoldChange = 
     ES_m <- EffectiveSize(Exp,y,FoldChange)
 	
 	###
-	theta = object@result_cell_proportion
-	Bulk = object@bulk
-	Ref = object@ref
-	GeneSigTab = GeneSigTest(Bulk,theta,Ref,p_threshold = p_cutoff)
+	GeneSigTab = GeneSigTest(object,p_threshold = p_cutoff)
 	
     for(i in cellName){
         Tab_m <- cbind(ES_m[,i],result$pval[,i],result$qval[,i],GeneSigTab$call[,i],GeneSigTab$pval[,i])

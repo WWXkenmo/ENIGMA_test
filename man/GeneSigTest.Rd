@@ -5,21 +5,16 @@
 \title{Perform Gene Expression Significance Test}
 \usage{
 GeneSigTest(
-  Bulk,
-  frac,
-  ref,
+  object,
   nMC = 1000,
   p_threshold = 0.05,
   refine = FALSE,
-  auto = TRUE
+  auto = TRUE,
+  filtering = FALSE
 )
 }
 \arguments{
-\item{Bulk}{Bulk expression matrix}
-
-\item{frac}{Estimated cell type fractions}
-
-\item{ref}{Reference profile matrix}
+\item{object}{an ENIGMA object}
 
 \item{nMC}{the number of bootstrapping times}
 
@@ -29,7 +24,7 @@ GeneSigTest(
 
 \item{auto}{automatically determine whether perform refinement}
 
-\item{covariate}{The data.frame object contains the covariate information of each sample}
+\item{filtering}{perform gene filtering for enigma object. Default: TRUE}
 }
 \value{
 A list object contain two object

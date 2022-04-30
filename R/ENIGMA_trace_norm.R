@@ -42,8 +42,8 @@
 #' @param verbose
 #' Whether return the information after each step of processing. Default: TRUE
 #'
-#' @param Normalize
-#' Whether perform normalization on resulted expression profile. Default: TRUE
+#' @param calibrate
+#' calibrate the inferred CSE into input bulk gene expression scale. Default: TRUE
 #'
 #' @param Norm.method
 #' Method used to perform normalization. User could choose PC, frac or quantile. Default: frac
@@ -60,11 +60,13 @@
 #' @param model_name
 #' name of the model
 #'
+#' @param force_normalize
+#' when alpha >= 0.9 or profile matrix is not generated from S-mode batch effect correction, ENIGMA would not perform normalization, if user still want to perform normalization, set force_normalize=TRUE. Default: FALSE
 #'
 #' @param X_int
 #' initialization for CSE profiles, an array object with three dimensions (the number of genes * the number of samples * the number of cell types), if user input a matrix (the number of genes * the number of samples), each cell type would be assigned the same start matrix.
 #'
-#' @return ENIGMA object where object@result_CSE contains the inferred CSE profile, object@result_CSE_normalized would contains normalized CSE profile if Normalize = TRUE, object@loss_his would contains the loss values of object functions during model training. If model_tracker = TRUE, then above results would be saved in the object@model.
+#' @return ENIGMA object where object@result_CSE contains the inferred CSE profile, object@result_CSE_normalized would contains normalized CSE profile, object@loss_his would contains the loss values of object functions during model training. If model_tracker = TRUE, then above results would be saved in the object@model.
 #'
 #'
 #' @examples
@@ -76,7 +78,7 @@
 #'
 #' @export
 #'
-ENIGMA_trace_norm <- function(object, theta, R, alpha=0.5,beta=1,tao_k=1,gamma=NULL,epsilon=NULL,max.iter=1000,solver = "admm",verbose=FALSE,pos=TRUE,Normalize=TRUE,Norm.method = "frac",preprocess = "log",loss_his=TRUE,model_tracker=FALSE,model_name = NULL,X_int=NULL){
+ENIGMA_trace_norm <- function(object, theta, R, alpha=0.5,beta=1,tao_k=1,gamma=NULL,epsilon=NULL,max.iter=1000,solver = "admm",verbose=FALSE,pos=TRUE,calibrate=TRUE,Norm.method = "frac",preprocess = "log",loss_his=TRUE,model_tracker=FALSE,model_name = NULL,X_int=NULL,force_normalize=FALSE){
     suppressPackageStartupMessages(require("scater"))
 	suppressPackageStartupMessages(require("preprocessCore"))
 	
@@ -152,7 +154,7 @@ ENIGMA_trace_norm <- function(object, theta, R, alpha=0.5,beta=1,tao_k=1,gamma=N
 	}
 	
 	if(is.null(gamma)){
-	   if(SVT_RM_value(O) < 1) gamma <- 2 
+	   if(SVT_RM_value(O) < 1) gamma <- 1
 	   if(SVT_RM_value(O) > 1) gamma <- 0.5
 	}
 
@@ -160,8 +162,8 @@ ENIGMA_trace_norm <- function(object, theta, R, alpha=0.5,beta=1,tao_k=1,gamma=N
 	if(is.null(model_name)){
 	  model_name = paste("trace_norm_model_",date(),"_trained",sep="")
 	}
-	  if(solver == "proximalpoint"){basic_infor = data.frame(alpha = alpha,beta = beta, step_size = tao_k, epsilon = epsilon,max_iter = max.iter,Normalize = Normalize,Normalize_method = Norm.method,preprocess = preprocess,solver = solver,pos=pos)}else{
-	  basic_infor = data.frame(alpha = alpha,beta = beta, gamma=gamma, epsilon = epsilon,max_iter = max.iter,Normalize = Normalize,Normalize_method = Norm.method,preprocess = preprocess,solver = solver,pos=pos)}
+	  if(solver == "proximalpoint"){basic_infor = data.frame(alpha = alpha,beta = beta, step_size = tao_k, epsilon = epsilon,max_iter = max.iter,calibrate = calibrate,Normalize_method = Norm.method,preprocess = preprocess,solver = solver,pos=pos)}else{
+	  basic_infor = data.frame(alpha = alpha,beta = beta, gamma=gamma, epsilon = epsilon,max_iter = max.iter,calibrate = calibrate,Normalize_method = Norm.method,preprocess = preprocess,solver = solver,pos=pos)}
 	  object@model[[model_name]] <- list(basic_infor = basic_infor)
 	}
 	
@@ -301,10 +303,26 @@ ENIGMA_trace_norm <- function(object, theta, R, alpha=0.5,beta=1,tao_k=1,gamma=N
 	##########
 	#Doing PC or Cell Fractions Normalization
 	if(pos) X_k[X_k<0] <- 0
+	
+	Normalize = FALSE
+	if(alpha<0.9&&object@ref_type != "single_cell"){
+	Normalize = TRUE
+	}
+	if(force_normalize){
+	Normalize = TRUE
+	}
+	
+	if(verbose&calibrate) writeLines("calibration...")
+	for(k in 1:dim(X_k)[3]){
+	if(preprocess == "sqrt") X_k[,,k] <- X_k[,,k]^2
+	if(preprocess == "log") X_k[,,k] <- 2^X_k[,,k] - 1
+	if(calibrate){
+	X_k[,,k] <- X_k[,,k] * (mean(colSums(object@bulk))/mean(colSums(X_k[,,k])))
+	}
+	}
+	X_k_m <- X_k
+	
 	if(Normalize){
-	if(preprocess == "log") X_k_m <- 2^X_k - 1
-	if(preprocess == "sqrt") X_k_m <- X_k^2
-	if(preprocess == "none") X_k_m <- X_k
 	writeLines("Normalization...")
 	X_k_norm <- X_k_m
 	if(Norm.method == "PC"){
@@ -321,11 +339,16 @@ ENIGMA_trace_norm <- function(object, theta, R, alpha=0.5,beta=1,tao_k=1,gamma=N
 			prob_d <- NULL;for(i in 1:length(d)) prob_d <- c(prob_d, sum(d[1:i]))
 			PC <- svd(exp.scale)$v[,1:which(prob_d>0.8)[1]]
 			pc_cor <- apply(PC,2,function(x){cor(x,theta[,k],method="sp")})
+			if(max(abs(pc_cor))<0.9){
+			warning("cannot found cell type proportion related principal component, using frac-based normalization automatically")
+			Norm.method = "frac"
+			}else{
 			PC <- PC[,which.max(abs(pc_cor))]
 			the <- (exp %*% as.matrix(PC) - length(PC) * mean(PC) * rowMeans(exp)) / (sum(PC^2) - length(PC)*mean(PC)^2)
 			exp.norm <- exp - as.matrix(the) %*% t(as.matrix(PC))
 			X_k_norm[,,k] <- exp.norm
 		}
+	  }
 	}
 	
 	if(Norm.method == "frac"){
@@ -350,12 +373,17 @@ ENIGMA_trace_norm <- function(object, theta, R, alpha=0.5,beta=1,tao_k=1,gamma=N
 	if(model_tracker){
 	  object@model[[model_name]]$result_CSE_normalized = res2sce(X_k_norm)
 	}
+	}else{
+	object@result_CSE_normalized = res2sce(X_k)
+	if(model_tracker){
+	  object@model[[model_name]]$result_CSE_normalized = object@result_CSE_normalized
 	}
+	}
+	rm(X_k_m);gc()
+	
 	writeLines( paste("Converge in ",steps," steps",sep="") )
 	# return cell type specific gene expression profile
-    if(preprocess == "sqrt") object@result_CSE = res2sce(X_k^2)
-	if(preprocess == "log") object@result_CSE = res2sce(2^X_k - 1)
-	if(preprocess == "none") object@result_CSE = res2sce(X_k)
+	object@result_CSE = res2sce(X_k)
 	##loading loss history
 	if(loss_his) object@loss_his = loss
 	if(model_tracker){
@@ -364,9 +392,7 @@ ENIGMA_trace_norm <- function(object, theta, R, alpha=0.5,beta=1,tao_k=1,gamma=N
 	   }else{
 	   object@model[[model_name]]$loss_his = NULL
 	   }
-	   if(preprocess == "sqrt") object@model[[model_name]]$result_CSE = res2sce(X_k^2)
-	   if(preprocess == "log") object@model[[model_name]]$result_CSE = res2sce(2^X_k - 1)
-	   if(preprocess == "none") object@model[[model_name]]$result_CSE = res2sce(X_k)
+	   object@model[[model_name]]$result_CSE = res2sce(X_k)
 	   
 	   ### import the model name and model type
 	   if(nrow(object@model_name)==0){

@@ -1,16 +1,12 @@
 #' @title Perform Gene Expression Significance Test
 #'
 #' 
-#' @param Bulk Bulk expression matrix
-#' @param frac Estimated cell type fractions
-#' @param ref Reference profile matrix
+#' @param object an ENIGMA object
 #' @param nMC the number of bootstrapping times
 #' @param p_threshold the threshold of pvalue to determine the significant gene
 #' @param refine whether perform refinement
 #' @param auto automatically determine whether perform refinement
-#'
-#' @param covariate
-#' The data.frame object contains the covariate information of each sample
+#' @param filtering perform gene filtering for enigma object. Default: TRUE
 #'
 #' @return A list object contain two object
 #'  call: A binary matrix (row: gene, column: cell type) indicating which gene has high confidence to be accurated estimated
@@ -19,7 +15,11 @@
 #'
 #'
 #' @export
-GeneSigTest <- function(Bulk,frac,ref,nMC = 1000,p_threshold = 0.05,refine=FALSE,auto=TRUE){
+GeneSigTest <- function(object,nMC = 1000,p_threshold = 0.05,refine=FALSE,auto=TRUE,filtering=FALSE){
+  Bulk = object@bulk
+  frac = object@result_cell_proportion
+  ref = object@ref
+  
   if(auto){
     cor <- cor(ref)
 	diag(cor) <- 0
@@ -90,12 +90,28 @@ GeneSigTest <- function(Bulk,frac,ref,nMC = 1000,p_threshold = 0.05,refine=FALSE
    if(refine) gene <- gene[order == ct]
    call[gene,ct] <- 1
   }
+  gene.call <- rowSums(call)
   
-  return(
-   list(
+  ## return the results and filtered enigma object
+  if(filtering){
+  Bulk = Bulk[gene.call>0,]
+  ref = ref[gene.call>0,]
+  egm@bulk <- Bulk
+  egm@ref <- ref
+  res <- list(
+    call = call,
+	pval = score,
+	egm = egm
+	)
+  }else{
+  res <- list(
     call = call,
 	pval = score
 	)
+  }
+  
+  return(
+   res
   )
 }  
 

@@ -17,13 +17,14 @@ ENIGMA_trace_norm(
   solver = "admm",
   verbose = FALSE,
   pos = TRUE,
-  Normalize = TRUE,
+  calibrate = TRUE,
   Norm.method = "frac",
   preprocess = "log",
   loss_his = TRUE,
   model_tracker = FALSE,
   model_name = NULL,
-  X_int = NULL
+  X_int = NULL,
+  force_normalize = FALSE
 )
 }
 \arguments{
@@ -59,7 +60,7 @@ Default: 0.0001}
 
 \item{verbose}{Whether return the information after each step of processing. Default: TRUE}
 
-\item{Normalize}{Whether perform normalization on resulted expression profile. Default: TRUE}
+\item{calibrate}{calibrate the inferred CSE into input bulk gene expression scale. Default: TRUE}
 
 \item{Norm.method}{Method used to perform normalization. User could choose PC, frac or quantile. Default: frac}
 
@@ -72,9 +73,11 @@ Default: 0.0001}
 \item{model_name}{name of the model}
 
 \item{X_int}{initialization for CSE profiles, an array object with three dimensions (the number of genes * the number of samples * the number of cell types), if user input a matrix (the number of genes * the number of samples), each cell type would be assigned the same start matrix.}
+
+\item{force_normalize}{when alpha >= 0.9 or profile matrix is not generated from S-mode batch effect correction, ENIGMA would not perform normalization, if user still want to perform normalization, set force_normalize=TRUE. Default: FALSE}
 }
 \value{
-ENIGMA object where object@result_CSE contains the inferred CSE profile, object@result_CSE_normalized would contains normalized CSE profile if Normalize = TRUE, object@loss_his would contains the loss values of object functions during model training. If model_tracker = TRUE, then above results would be saved in the object@model.
+ENIGMA object where object@result_CSE contains the inferred CSE profile, object@result_CSE_normalized would contains normalized CSE profile, object@loss_his would contains the loss values of object functions during model training. If model_tracker = TRUE, then above results would be saved in the object@model.
 }
 \description{
 trace norm version is the alternative version of ENIGMA, which is the regularized weighted matrix completion to constraint the trace norm of inferred cell type-specific gene expression matrix.

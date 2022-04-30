@@ -24,8 +24,8 @@
 #' @param pos
 #' Set all entries in CSE is positive. Default: TRUE
 #'
-#' @param Normalize
-#' perform normalization on resulted expression profile. Default: TRUE
+#' @param calibrate
+#' calibrate the inferred CSE into input bulk gene expression scale. Default: TRUE
 #'
 #' @param Norm.method
 #' Method used to perform normalization. User could choose PC, frac or quantile
@@ -45,7 +45,10 @@
 #' @param X_int
 #' initialization for CSE profiles, an array object with three dimensions (the number of genes * the number of samples * the number of cell types), if user input a matrix (the number of genes * the number of samples), each cell type would be assigned the same start matrix.
 #'
-#' @return ENIGMA object where object@result_CSE contains the inferred CSE profile, object@result_CSE_normalized would contains normalized CSE profile if Normalize = TRUE, object@loss_his would contains the loss values of object functions during model training. If model_tracker = TRUE, then above results would be saved in the object@model.
+#' @param force_normalize
+#' when alpha >= 0.9 or profile matrix is not generated from S-mode batch effect correction, ENIGMA would not perform normalization, if user still want to perform normalization, set force_normalize=TRUE. Default: FALSE
+#'
+#' @return ENIGMA object where object@result_CSE contains the inferred CSE profile, object@result_CSE_normalized would contains normalized CSE profile, object@loss_his would contains the loss values of object functions during model training. If model_tracker = TRUE, then above results would be saved in the object@model.
 #'
 #'
 #' @examples
@@ -57,7 +60,7 @@
 #'
 #'
 #' @export
-ENIGMA_L2_max_norm <- function(object, alpha=0.5, tao_k=0.01, beta=0.1, epsilon=0.001, max.iter=1000,verbose=FALSE, pos=TRUE,Normalize = TRUE, Norm.method = "frac",preprocess = "sqrt",loss_his=TRUE,model_tracker=FALSE,model_name = NULL,X_int=NULL){
+ENIGMA_L2_max_norm <- function(object, alpha=0.5, tao_k=0.01, beta=0.1, epsilon=0.001, max.iter=1000,verbose=FALSE, pos=TRUE,calibrate=TRUE, Norm.method = "frac",preprocess = "sqrt",loss_his=TRUE,model_tracker=FALSE,model_name = NULL,X_int=NULL,force_normalize=FALSE){
     suppressPackageStartupMessages(require("scater"))
 	suppressPackageStartupMessages(require("preprocessCore"))
 	
@@ -66,7 +69,7 @@ ENIGMA_L2_max_norm <- function(object, alpha=0.5, tao_k=0.01, beta=0.1, epsilon=
 	if(is.null(model_name)){
 	  model_name = paste("maximum_L2_norm_model_",date(),"_trained",sep="")
 	}
-	  basic_infor = data.frame(alpha = alpha,beta = beta, step_size = tao_k, epsilon = epsilon,max_iter = max.iter,Normalize = Normalize,Normalize_method = Norm.method,preprocess = preprocess,pos=pos)
+	  basic_infor = data.frame(alpha = alpha,beta = beta, step_size = tao_k, epsilon = epsilon,max_iter = max.iter,calibrate = calibrate,Normalize_method = Norm.method,preprocess = preprocess,pos=pos)
 	  object@model[[model_name]] <- list(basic_infor = basic_infor)
 	}
 	
@@ -166,14 +169,31 @@ ENIGMA_L2_max_norm <- function(object, alpha=0.5, tao_k=0.01, beta=0.1, epsilon=
         ### optimize theta
         ### take the gradient of all theta and running gradient decent
         if(pos){P_old[P_old<0] <- 0}
-    
+    X_k_norm <- X_k <- P_old
+	if(verbose&calibrate) writeLines("calibration...")
+	for(k in 1:dim(X_k)[3]){
+	if(preprocess == "sqrt") X_k[,,k] <- X_k[,,k]^2
+	if(preprocess == "log") X_k[,,k] <- 2^X_k[,,k] - 1
+	if(calibrate){
+	X_k[,,k] <- X_k[,,k] * (mean(colSums(object@bulk))/mean(colSums(X_k[,,k])))
+	}
+	}
+	
+	### if normalize the expression profile
+	Normalize = FALSE
+	if(alpha<0.9){
+	Normalize = TRUE
+	}
+	if(force_normalize){
+	Normalize = TRUE
+	}
+	
 	if(Normalize){
 	if(verbose) cat("Perform Normalization...")
-	X_k_norm <- X_k <- P_old
+	#X_k_norm <- X_k <- P_old
 	if(Norm.method == "PC"){
 	for(k in 1:dim(X_k)[3]){
-	   if(preprocess == "sqrt") exp <- X_k[,,k]^2
-	   if(preprocess == "log") exp <- 2^X_k[,,k] - 1
+	   exp <- X_k[,,k]
 	   scale_x <- function(x){
 	   if(var(x)==0){x <- x - mean(x)}else{x <- scale(x)}
 	   x
@@ -185,17 +205,21 @@ ENIGMA_L2_max_norm <- function(object, alpha=0.5, tao_k=0.01, beta=0.1, epsilon=
 	prob_d <- NULL;for(i in 1:length(d)) prob_d <- c(prob_d, sum(d[1:i]))
 	PC <- svd(exp.scale)$v[,1:which(prob_d>0.8)[1]]
 	pc_cor <- apply(PC,2,function(x){cor(x,theta[,k],method="sp")})
+	if(max(abs(pc_cor))<0.9){
+    warning("cannot found cell type proportion related principal component, using frac-based normalization automatically")
+	Norm.method = "frac"
+	}else{
 	PC <- PC[,which.max(abs(pc_cor))]
 	the <- (exp %*% as.matrix(PC) - length(PC) * mean(PC) * rowMeans(exp)) / (sum(PC^2) - length(PC)*mean(PC)^2)
 	exp.norm <- exp - as.matrix(the) %*% t(as.matrix(PC))
 	X_k_norm[,,k] <- exp.norm
 	}
 	}
+	}
         
 	if(Norm.method == "frac"){
 	for(k in 1:dim(X_k)[3]){
-	   if(preprocess == "sqrt") exp <- X_k[,,k]^2
-	   if(preprocess == "log") exp <- 2^X_k[,,k] - 1
+	   exp <- X_k[,,k]
 	   PC <- theta[,k]
        the <- (exp %*% as.matrix(PC) - length(PC) * mean(PC) * rowMeans(exp)) / (sum(PC^2) - length(PC)*mean(PC)^2)
        exp.norm <- exp - as.matrix(the) %*% t(as.matrix(PC))
@@ -205,8 +229,7 @@ ENIGMA_L2_max_norm <- function(object, alpha=0.5, tao_k=0.01, beta=0.1, epsilon=
 	
 	if(Norm.method == "quantile"){
 	for(k in 1:dim(X_k)[3]){
-	   if(preprocess == "sqrt") exp <- X_k[,,k]^2
-	   if(preprocess == "log") exp <- 2^X_k[,,k] - 1
+	   exp <- X_k[,,k]
 	   exp.norm <- normalize.quantiles(exp)
 	   rownames(exp.norm) <- rownames(exp)
 	   colnames(exp.norm) <- colnames(exp)
@@ -218,12 +241,17 @@ ENIGMA_L2_max_norm <- function(object, alpha=0.5, tao_k=0.01, beta=0.1, epsilon=
 	if(model_tracker){
 	  object@model[[model_name]]$result_CSE_normalized = res2sce(X_k_norm)
 	}
+	
+	}else{
+	object@result_CSE_normalized = res2sce(X_k)
+	if(model_tracker){
+	  object@model[[model_name]]$result_CSE_normalized = object@result_CSE_normalized
 	}
+	}
+	
 	writeLines( paste("Converge in ",iter.exp," steps",sep="") )
 	# return cell type specific gene expression profile
-    if(preprocess == "sqrt") object@result_CSE = res2sce(P_old^2)
-	if(preprocess == "log") object@result_CSE = res2sce(2^P_old - 1)
-	if(preprocess == "none") object@result_CSE = res2sce(P_old)
+    object@result_CSE = res2sce(X_k)
 	
 	##loading loss history
 	if(loss_his) object@loss_his = loss
@@ -233,9 +261,7 @@ ENIGMA_L2_max_norm <- function(object, alpha=0.5, tao_k=0.01, beta=0.1, epsilon=
 	   }else{
 	   object@model[[model_name]]$loss_his = NULL
 	   }
-	   if(preprocess == "sqrt") object@model[[model_name]]$result_CSE = res2sce(P_old^2)
-	   if(preprocess == "log") object@model[[model_name]]$result_CSE = res2sce(2^P_old - 1)
-	   if(preprocess == "none") object@model[[model_name]]$result_CSE = res2sce(P_old)
+	   object@model[[model_name]]$result_CSE = res2sce(X_k)
 	   
 	   ### import the model name and model type
 	   if(nrow(object@model_name)==0){
