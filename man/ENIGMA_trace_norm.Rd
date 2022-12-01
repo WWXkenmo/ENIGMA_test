@@ -12,7 +12,7 @@ ENIGMA_trace_norm(
   beta = 1,
   tao_k = 1,
   gamma = 0.5,
-  epsilon = 1e-04,
+  epsilon = 0.001,
   epsilon_ks = 0.001,
   max_ks = 1,
   max.iter = 1000,
