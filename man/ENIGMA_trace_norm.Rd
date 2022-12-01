@@ -26,7 +26,7 @@ ENIGMA_trace_norm(
   print_loss = FALSE,
   model_tracker = FALSE,
   model_name = NULL,
-  X_int = FALSE,
+  X_int = NULL,
   calibrate = TRUE
 )
 }

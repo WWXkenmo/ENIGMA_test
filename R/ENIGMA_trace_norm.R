@@ -87,7 +87,7 @@
 #'
 #' @export
 #'
-ENIGMA_trace_norm <- function(object, theta, R, alpha=0.5,beta=1,tao_k=1,gamma=0.5,epsilon=0.0001,epsilon_ks = 0.001,max_ks = 1, max.iter=1000,solver = "proximalpoint",verbose=FALSE,pos=TRUE,Normalize=TRUE,Norm.method = "frac",preprocess = "log",loss_his=FALSE,print_loss = FALSE, model_tracker=FALSE,model_name = NULL,X_int=FALSE, calibrate = TRUE){
+ENIGMA_trace_norm <- function(object, theta, R, alpha=0.5,beta=1,tao_k=1,gamma=0.5,epsilon=0.0001,epsilon_ks = 0.001,max_ks = 1, max.iter=1000,solver = "proximalpoint",verbose=FALSE,pos=TRUE,Normalize=TRUE,Norm.method = "frac",preprocess = "log",loss_his=FALSE,print_loss = FALSE, model_tracker=FALSE,model_name = NULL,X_int=NULL, calibrate = TRUE){
     suppressPackageStartupMessages(require("scater"))
 	suppressPackageStartupMessages(require("preprocessCore"))
 	
@@ -196,6 +196,7 @@ ENIGMA_trace_norm <- function(object, theta, R, alpha=0.5,beta=1,tao_k=1,gamma=0
 	}
 	
     #calculate F matrix
+	if(solver == "admm_fast"){
     F = array(0,
               dim = c( ncol(O),
                        ncol(O),
@@ -205,9 +206,10 @@ ENIGMA_trace_norm <- function(object, theta, R, alpha=0.5,beta=1,tao_k=1,gamma=0
                                colnames(theta))
     )
     for(i in 1:ncol(theta)){F[,,i] <- getF(theta[,i],alpha,gamma,a)}
+	}
     theta_hat <- colMeans(theta)
     
-    k <- 1
+    k <- 0
     delta <- delta_ks <- ks_new <- ks <- 10000
     loss <- NULL
     if(verbose) cat(date(), 'Optimizing cell type specific expression profile... \n')
