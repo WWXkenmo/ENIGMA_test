@@ -60,7 +60,7 @@
 #'
 #'
 #' @export
-ENIGMA_L2_max_norm <- function(object, alpha=0.5, tao_k=0.01, beta=0.1, epsilon=0.001, max.iter=1000,verbose=FALSE, pos=TRUE,calibrate=TRUE, Norm.method = "frac",preprocess = "sqrt",loss_his=TRUE,model_tracker=FALSE,model_name = NULL,X_int=NULL,force_normalize=FALSE){
+ENIGMA_L2_max_norm <- function(object, alpha=0.5, tao_k=0.01, beta=0.1, epsilon=0.001, max.iter=1000,verbose=FALSE, pos=TRUE,calibrate=TRUE, Norm.method = "frac",preprocess = "sqrt",loss_his=TRUE,model_tracker=FALSE,model_name = NULL,X_int=NULL, Normalize =  TRUE){
     suppressPackageStartupMessages(require("scater"))
 	suppressPackageStartupMessages(require("preprocessCore"))
 	
@@ -80,19 +80,33 @@ ENIGMA_L2_max_norm <- function(object, alpha=0.5, tao_k=0.01, beta=0.1, epsilon=
         stop("Invalid normalization method type. Please input 'PC','frac' or 'quantile'. ")
     }
 	
-    if(preprocess == "sqrt") X = sqrt(object@bulk)
-	if(preprocess == "log") X = log2(object@bulk+1)
-	if(preprocess == "none") X = object@bulk
-	
+    X = object@bulk
     theta = object@result_cell_proportion
-	if(preprocess == "sqrt") R = sqrt(object@ref)
-	if(preprocess == "log") R = log2(object@ref+1)
-	if(preprocess == "none") R = object@ref
+	R = object@ref
 	
     # unify geneid between X and R
     geneid = intersect( rownames(X), rownames(R) )
     X = X[geneid,]
     R = R[geneid,]
+  
+    ## renormalization
+	geneID <- rownames(X)
+	sampleID <- colnames(X)
+	ctID <- colnames(R)
+	X <- X %*% diag(10^5/colSums(X))
+	R <- R %*% diag(10^5/colSums(R))
+	rownames(X) <- rownames(R) <- geneID
+	colnames(X) <- sampleID
+	colnames(R) <- ctID
+    
+    if(preprocess == "log"){
+	 X <- log2(X+1)
+	 R <- log2(R+1)
+	}
+	if(preprocess == "sqrt"){
+	 X <- sqrt(X)
+	 R <- sqrt(R)
+	}
 
     # initialize the CSE
     P_old = array(0,
@@ -129,14 +143,14 @@ ENIGMA_L2_max_norm <- function(object, alpha=0.5, tao_k=0.01, beta=0.1, epsilon=
     rm(X_int, X_int_m);gc()
     ###update iteractively
     P_old_new <- P_old
-
+    mask_entry <- matrix(1,nrow = nrow(X), ncol = ncol(X)); mask_entry[X==0] <- 0
     cat(date(), 'Optimizing cell type specific expression profile... \n')
             iter.exp <- 0
 			loss <- NULL
 			DisList <- NULL
             repeat{
                 ratio <- NULL
-                dP <- derive_P2(X, theta,P_old,R,alpha)
+                dP <- derive_P2(X, theta,P_old,R,alpha,mask_entry)
                 for(i in 1:ncol(theta)){
                     P_hat <- proximalpoint(P_old[,,i], tao_k,dP[,,i],beta*10^5)
                     P_old_new[,,i] <- P_hat
@@ -170,22 +184,13 @@ ENIGMA_L2_max_norm <- function(object, alpha=0.5, tao_k=0.01, beta=0.1, epsilon=
         ### take the gradient of all theta and running gradient decent
         if(pos){P_old[P_old<0] <- 0}
     X_k_norm <- X_k <- P_old
-	if(verbose&calibrate) writeLines("calibration...")
+	if(pos&verbose&calibrate) writeLines("calibration...")
 	for(k in 1:dim(X_k)[3]){
 	if(preprocess == "sqrt") X_k[,,k] <- X_k[,,k]^2
 	if(preprocess == "log") X_k[,,k] <- 2^X_k[,,k] - 1
-	if(calibrate){
+	if(pos&calibrate){
 	X_k[,,k] <- X_k[,,k] * (mean(colSums(object@bulk))/mean(colSums(X_k[,,k])))
 	}
-	}
-	
-	### if normalize the expression profile
-	Normalize = FALSE
-	if(alpha<0.9){
-	Normalize = TRUE
-	}
-	if(force_normalize){
-	Normalize = TRUE
 	}
 	
 	if(Normalize){
@@ -372,7 +377,7 @@ proximalpoint <- function(P, tao_k,dP,beta){
 
 
 
-derive_P2 <- function(X, theta, P_old,R,alpha){
+derive_P2 <- function(X, theta, P_old,R,alpha,mask_entry){
   ## P_old: a tensor variable with three dimensions
   ## theta: the cell type proportions variable
   ## cell_type_index: optimize which type of cells
@@ -387,33 +392,26 @@ derive_P2 <- function(X, theta, P_old,R,alpha){
   )
   for(cell_type_index in 1:ncol(theta)){
     R.m <- as.matrix(R[,cell_type_index])
-    
+
     cell_type_seq <- c(1:ncol(theta))
     cell_type_seq <- cell_type_seq[cell_type_seq!=cell_type_index]
-    
+
     X_summary = Reduce("+",
                        lapply(cell_type_seq, function(i) P_old[,,i]%*%diag(theta[,i]) )
     )
     X_summary <- X-X_summary
-    
+
     dP1[,,cell_type_index] <- 2*(P_old[,,cell_type_index]%*%diag(theta[,cell_type_index]) - X_summary)%*%diag(theta[,cell_type_index])
     dP2[,,cell_type_index] <- 2*(as.matrix(rowMeans(P_old[,,cell_type_index]))-R.m)%*%t(as.matrix(rep((1/ncol(dP2[,,cell_type_index])),ncol(dP2[,,cell_type_index]))))
-	}
+	dP1[,,cell_type_index] <- dP1[,,cell_type_index]*mask_entry
+	dP2[,,cell_type_index] <- dP2[,,cell_type_index]*mask_entry
+  }
   dP1 = dP1 / sqrt( sum( dP1^2 ) ) * 1e5
   dP2 = dP2 / sqrt( sum( dP2^2 ) ) * 1e5
-  
-  #calculate w1
-  #if( crossprod(as.matrix(dP1), as.matrix(dP2)) >= crossprod(as.matrix(dP1)) ) {w1 = 1}
-  #else if( crossprod(as.matrix(dP1), as.matrix(dP2)) >= crossprod(as.matrix(dP2)) ) {w1 = 0}
-  #else {
-  #    w1 = crossprod(as.matrix(dP2-dP1), as.matrix(dP2))/sum((dP1-dP2)^2)
-  #}
+
   w1 <- alpha
   w2 <- 1-w1
-  
+
   dP <- dP1*as.numeric(w1) + dP2*as.numeric(w2)
   return(dP)
 }
-
-
-

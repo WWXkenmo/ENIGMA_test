@@ -20,7 +20,7 @@ ENIGMA_L2_max_norm(
   model_tracker = FALSE,
   model_name = NULL,
   X_int = NULL,
-  force_normalize = FALSE
+  Normalize = TRUE
 )
 }
 \arguments{

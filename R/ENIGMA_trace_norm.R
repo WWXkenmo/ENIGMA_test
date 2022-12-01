@@ -38,12 +38,23 @@
 #' @param solver
 #' The solver for solving trace norm model. method used: admm, admm_fast or proximal point method
 #'
+#' @param epsilon_ks
+#' Minimum error between the conditional number score (see Supplementary Notes for more details) of iteration i and i+1. Default: 0.001
 #'
+#' @param max_ks
+#' The stop criteria for conditional number score (see Supplementary Notes for more details). Default: 1
+#' 
 #' @param verbose
 #' Whether return the information after each step of processing. Default: TRUE
 #'
+#' @param pos
+#' Set all entries in CSE is positive. Default: TRUE
+#'
 #' @param calibrate
 #' calibrate the inferred CSE into input bulk gene expression scale. Default: TRUE
+#'
+#' @param Normalize
+#' Whether perform normalization on resulted expression profile. Default: TRUE
 #'
 #' @param Norm.method
 #' Method used to perform normalization. User could choose PC, frac or quantile. Default: frac
@@ -60,13 +71,11 @@
 #' @param model_name
 #' name of the model
 #'
-#' @param force_normalize
-#' when alpha >= 0.9 or profile matrix is not generated from S-mode batch effect correction, ENIGMA would not perform normalization, if user still want to perform normalization, set force_normalize=TRUE. Default: FALSE
 #'
 #' @param X_int
 #' initialization for CSE profiles, an array object with three dimensions (the number of genes * the number of samples * the number of cell types), if user input a matrix (the number of genes * the number of samples), each cell type would be assigned the same start matrix.
 #'
-#' @return ENIGMA object where object@result_CSE contains the inferred CSE profile, object@result_CSE_normalized would contains normalized CSE profile, object@loss_his would contains the loss values of object functions during model training. If model_tracker = TRUE, then above results would be saved in the object@model.
+#' @return ENIGMA object where object@result_CSE contains the inferred CSE profile, object@result_CSE_normalized would contains normalized CSE profile if Normalize = TRUE, object@loss_his would contains the loss values of object functions during model training. If model_tracker = TRUE, then above results would be saved in the object@model.
 #'
 #'
 #' @examples
@@ -78,7 +87,7 @@
 #'
 #' @export
 #'
-ENIGMA_trace_norm <- function(object, theta, R, alpha=0.5,beta=1,tao_k=1,gamma=NULL,epsilon=NULL,max.iter=1000,solver = "admm",verbose=FALSE,pos=TRUE,calibrate=TRUE,Norm.method = "frac",preprocess = "log",loss_his=TRUE,model_tracker=FALSE,model_name = NULL,X_int=NULL,force_normalize=FALSE){
+ENIGMA_trace_norm <- function(object, theta, R, alpha=0.5,beta=1,tao_k=1,gamma=0.5,epsilon=0.0001,epsilon_ks = 0.001,max_ks = 1, max.iter=1000,solver = "admm",verbose=FALSE,pos=TRUE,Normalize=TRUE,Norm.method = "frac",preprocess = "log",loss_his=FALSE,print_loss = FALSE, model_tracker=FALSE,model_name = NULL,X_int=FALSE, calibrate = TRUE){
     suppressPackageStartupMessages(require("scater"))
 	suppressPackageStartupMessages(require("preprocessCore"))
 	
@@ -93,19 +102,37 @@ ENIGMA_trace_norm <- function(object, theta, R, alpha=0.5,beta=1,tao_k=1,gamma=N
         stop("Invalid solver. Please input 'proximalpoint', 'admm_fast','admm'. ")
     }
 	
-    if(preprocess == "sqrt") O = sqrt(object@bulk)
-	if(preprocess == "log") O = log2(object@bulk+1)
-	if(preprocess == "none") O = object@bulk
-	
     theta = object@result_cell_proportion
-	if(preprocess == "sqrt") R = sqrt(object@ref)
-	if(preprocess == "log") R = log2(object@ref+1)
-	if(preprocess == "none") R = object@ref
-	
+    O = object@bulk
+    R = object@ref
     # unify geneid between O and R
     geneid = intersect( rownames(O), rownames(R) )
     O = O[geneid,]
     R = R[geneid,]
+
+    ## renormalization
+	geneID <- rownames(O)
+	sampleID <- colnames(O)
+	ctID <- colnames(R)
+	O <- O %*% diag(10^5/colSums(O))
+	R <- R %*% diag(10^5/colSums(R))
+	rownames(O) <- rownames(R) <- geneID
+	colnames(O) <- sampleID
+	colnames(R) <- ctID
+	
+	if(preprocess == "log"){
+	 O <- log2(O+1)
+	 R <- log2(R+1)
+	}
+	if(preprocess == "sqrt"){
+	 O <- sqrt(O)
+	 R <- sqrt(R)
+	}
+	
+	rm(geneID,sampleID,ctID);gc()
+	
+	## ref kappa score
+	ref_kappa <- kappa(R)
 
     X = array(0,
               dim = c( nrow(O),
@@ -140,6 +167,7 @@ ENIGMA_trace_norm <- function(object, theta, R, alpha=0.5,beta=1,tao_k=1,gamma=N
     }
     rm(X_int, X_int_m);gc()
     ###
+    mask_entry <- matrix(1,nrow = nrow(O), ncol = ncol(O)); mask_entry[O==0] <- 0
     A <- Y <- X
     A_k_1 <- A_k <- A
     Y_k_1 <- Y_k <- Y
@@ -154,7 +182,7 @@ ENIGMA_trace_norm <- function(object, theta, R, alpha=0.5,beta=1,tao_k=1,gamma=N
 	}
 	
 	if(is.null(gamma)){
-	   if(SVT_RM_value(O) < 1) gamma <- 1
+	   if(SVT_RM_value(O) < 1) gamma <- 2 
 	   if(SVT_RM_value(O) > 1) gamma <- 0.5
 	}
 
@@ -179,8 +207,8 @@ ENIGMA_trace_norm <- function(object, theta, R, alpha=0.5,beta=1,tao_k=1,gamma=N
     for(i in 1:ncol(theta)){F[,,i] <- getF(theta[,i],alpha,gamma,a)}
     theta_hat <- colMeans(theta)
     
-    k <- 0
-    delta <- 10000
+    k <- 1
+    delta <- delta_ks <- ks_new <- ks <- 10000
     loss <- NULL
     if(verbose) cat(date(), 'Optimizing cell type specific expression profile... \n')
 	if(verbose){
@@ -192,7 +220,10 @@ ENIGMA_trace_norm <- function(object, theta, R, alpha=0.5,beta=1,tao_k=1,gamma=N
 	
 	writeLines(paste("Using ",solver," solver...",sep=""))
     repeat{
-        if(abs(delta)<epsilon||k>=max.iter){
+        cond1 <- abs(delta)<epsilon||k>max.iter
+		cond2 <- abs(delta_ks) < epsilon_ks || ks_new < max_ks
+        cond2 <- cond2||k>max.iter
+        if(cond1&cond2){
             break;
         }else{
             ###################################
@@ -202,6 +233,7 @@ ENIGMA_trace_norm <- function(object, theta, R, alpha=0.5,beta=1,tao_k=1,gamma=N
 		X_k <- X_k_1
 		Y_k <- Y_k_1
 		A_k <- A_k_1
+        ks <- ks_new
 		
 		ratio <- NULL
 		loss <- NULL
@@ -209,13 +241,13 @@ ENIGMA_trace_norm <- function(object, theta, R, alpha=0.5,beta=1,tao_k=1,gamma=N
 		updated_X <- getX(O,theta,R,A_k,Y_k,alpha,gamma)
 		for(j in 1:ncol(theta)){
 			#a <- as.matrix(a.m[j,])
-			X_k_1[,,j] <- updated_X[,,j]
-			Y_k_1[,,j] <- SVT(((A_k[,,j]/gamma)+X_k_1[,,j]),(beta*theta_hat[j])/gamma)
+			X_k_1[,,j] <- updated_X[,,j]*mask_entry
+			Y_k_1[,,j] <- SVT(((A_k[,,j]/gamma)+X_k_1[,,j]),(beta*theta_hat[j])/gamma)*mask_entry
 			
 			A_k_1[,,j] <- A_k[,,j] + gamma*(X_k_1[,,j]-Y_k_1[,,j])
 			ratio <- c(ratio, sum( (X_k_1[,,j]-X_k[,,j])^2 )/(nrow(X[,,j])*ncol(X[,,j])))
 		}
-		r1 <- loss(O,X_k,theta,alpha,beta,R) #calculating raw loss
+		if(print_loss) r1 <- loss(O,X_k,theta,alpha,beta,R) #calculating raw loss
 		if(verbose){
 		#print matrix ratio distance or absolute distance
 		print <- paste("CSE inference step ",k," \n",sep="")
@@ -225,9 +257,12 @@ ENIGMA_trace_norm <- function(object, theta, R, alpha=0.5,beta=1,tao_k=1,gamma=N
 		print <- paste(print, colnames(R)[length(ratio)], ": ",ratio[length(ratio)],sep="")
 		writeLines(print)
 		}
-		if(loss_his) loss<- rbind(loss,c(r1$part1,r1$part2,r1$part3))
-		if(verbose) writeLines( sprintf("   Loss: part1=%f , part2=%f , part3=%f", r1$part1,r1$part2,r1$part3 ) )
+		if(loss_his&print_loss) loss<- rbind(loss,c(r1$part1,r1$part2,r1$part3))
+		ks_new = abs(KappaScore(X_k) - ref_kappa)
+		kss = format(ks_new, scientific=TRUE, digit=4)
+		if(verbose) writeLines( paste(" Kappa Score: ",kss,sep="" ))
 		delta <- max(ratio)
+		delta_ks <- ks_new - ks
 		k <- k+1
 		}
 		
@@ -237,19 +272,20 @@ ENIGMA_trace_norm <- function(object, theta, R, alpha=0.5,beta=1,tao_k=1,gamma=N
 		X_k <- X_k_1
 		Y_k <- Y_k_1
 		A_k <- A_k_1
+        ks <- ks_new
 		
 	    ratio <- NULL
 		for(j in 1:ncol(theta)){
 			#a <- as.matrix(a.m[j,])
 			T_k_j <- getT(j,X_k,theta,O,alpha)
-			X_k_1[,,j] <- ((1-alpha)*as.matrix(R[,j])%*%t(a) - A_k[,,j] + gamma*Y_k[,,j] - T_k_j)%*%F[,,j]
-			Y_k_1[,,j] <- SVT(((A_k[,,j]/gamma)+X_k_1[,,j]),(beta*theta_hat[j])/gamma)
+			X_k_1[,,j] <- ((1-alpha)*as.matrix(R[,j])%*%t(a) - A_k[,,j] + gamma*Y_k[,,j] - T_k_j)%*%F[,,j]*mask_entry
+			Y_k_1[,,j] <- SVT(((A_k[,,j]/gamma)+X_k_1[,,j]),(beta*theta_hat[j])/gamma)*mask_entry
 
 			A_k_1[,,j] <- A_k[,,j] + gamma*(X_k_1[,,j]-Y_k_1[,,j])
 			ratio <- c(ratio, sum( (X_k_1[,,j]-X_k[,,j])^2 )/(nrow(X[,,j])*ncol(X[,,j])))
 		}
 
-		r <- loss(O,X_k,theta,alpha,beta,R)
+		if(print_loss) r <- loss(O,X_k,theta,alpha,beta,R)
 		if(verbose){
 		#print matrix ratio distance or absolute distance
 		print <- paste("CSE inference step ",k," \n",sep="")
@@ -259,9 +295,12 @@ ENIGMA_trace_norm <- function(object, theta, R, alpha=0.5,beta=1,tao_k=1,gamma=N
 		print <- paste(print, colnames(R)[length(ratio)], ": ",ratio[length(ratio)],sep="")
 		writeLines(print)
 		}
-		if(loss_his) loss<- rbind(loss,c(r$part1,r$part2,r$part3))
-		if(verbose) writeLines( sprintf("   Loss: part1=%f , part2=%f , part3=%f", r$part1,r$part2,r$part3 ) )
+		if(loss_his&print_loss) loss<- rbind(loss,c(r$part1,r$part2,r$part3))
+		ks_new = abs(KappaScore(X_k) - ref_kappa)
+		kss = format(ks_new, scientific=TRUE, digit=4)
+		if(verbose) writeLines( paste(" Kappa Score: ",kss,sep="" ))
 		delta <- max(ratio)
+		delta_ks <- ks_new - ks
 		k <- k+1
 		}
 		
@@ -271,17 +310,18 @@ ENIGMA_trace_norm <- function(object, theta, R, alpha=0.5,beta=1,tao_k=1,gamma=N
 		X_k <- X_k_1
 		Y_k <- Y_k_1
 		A_k <- A_k_1
+        ks <- ks_new
 		
 		ratio <- NULL
         dP <- derive_P(O, theta,X_k,R,alpha)
         for(j in 1:ncol(theta)){
             X_i <- X_k[,,j]- tao_k*dP[,,j]
             X_i <- SVT(X_i,tao_k*theta_hat[j]*beta)
-            X_k_1[,,j] <- X_i
+            X_k_1[,,j] <- X_i*mask_entry
             
             ratio <- c(ratio, sum( (X_k_1[,,j]-X_k[,,j])^2 )/(nrow(X[,,j])*ncol(X[,,j])))
         }
-		r <- loss(O,X_k,theta,alpha,beta,R)
+		if(print_loss) r <- loss(O,X_k,theta,alpha,beta,R)
 		if(verbose){
 		#print matrix ratio distance or absolute distance
 		print <- paste("CSE inference step ",k," \n",sep="")
@@ -291,9 +331,12 @@ ENIGMA_trace_norm <- function(object, theta, R, alpha=0.5,beta=1,tao_k=1,gamma=N
 		print <- paste(print, colnames(R)[length(ratio)], ": ",ratio[length(ratio)],sep="")
 		writeLines(print)
 		}
-		if(loss_his) loss<- rbind(loss,c(r$part1,r$part2,r$part3))
-		if(verbose) writeLines( sprintf("   Loss: part1=%f , part2=%f , part3=%f", r$part1,r$part2,r$part3 ) )
+		if(loss_his&print_loss) loss<- rbind(loss,c(r$part1,r$part2,r$part3))
+		ks_new = abs(KappaScore(X_k) - ref_kappa)
+		kss = format(ks_new, scientific=TRUE, digit=4)
+		if(verbose) writeLines( paste(" Kappa Score: ",kss,sep="" ))
 		delta <- max(ratio)
+		delta_ks <- ks_new - ks
 		k <- k+1
 		}
 		
@@ -303,20 +346,12 @@ ENIGMA_trace_norm <- function(object, theta, R, alpha=0.5,beta=1,tao_k=1,gamma=N
 	##########
 	#Doing PC or Cell Fractions Normalization
 	if(pos) X_k[X_k<0] <- 0
-	
-	Normalize = FALSE
-	if(alpha<0.9&&object@ref_type != "single_cell"){
-	Normalize = TRUE
-	}
-	if(force_normalize){
-	Normalize = TRUE
-	}
-	
-	if(verbose&calibrate) writeLines("calibration...")
+
+	if(pos&verbose&calibrate) writeLines("calibration...")
 	for(k in 1:dim(X_k)[3]){
 	if(preprocess == "sqrt") X_k[,,k] <- X_k[,,k]^2
 	if(preprocess == "log") X_k[,,k] <- 2^X_k[,,k] - 1
-	if(calibrate){
+	if(pos&calibrate){
 	X_k[,,k] <- X_k[,,k] * (mean(colSums(object@bulk))/mean(colSums(X_k[,,k])))
 	}
 	}
