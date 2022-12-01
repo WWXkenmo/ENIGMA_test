@@ -16,7 +16,7 @@ ENIGMA_trace_norm(
   epsilon_ks = 0.001,
   max_ks = 1,
   max.iter = 1000,
-  solver = "admm",
+  solver = "proximalpoint",
   verbose = FALSE,
   pos = TRUE,
   Normalize = TRUE,

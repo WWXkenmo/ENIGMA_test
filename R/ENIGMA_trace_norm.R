@@ -87,7 +87,7 @@
 #'
 #' @export
 #'
-ENIGMA_trace_norm <- function(object, theta, R, alpha=0.5,beta=1,tao_k=1,gamma=0.5,epsilon=0.0001,epsilon_ks = 0.001,max_ks = 1, max.iter=1000,solver = "admm",verbose=FALSE,pos=TRUE,Normalize=TRUE,Norm.method = "frac",preprocess = "log",loss_his=FALSE,print_loss = FALSE, model_tracker=FALSE,model_name = NULL,X_int=FALSE, calibrate = TRUE){
+ENIGMA_trace_norm <- function(object, theta, R, alpha=0.5,beta=1,tao_k=1,gamma=0.5,epsilon=0.0001,epsilon_ks = 0.001,max_ks = 1, max.iter=1000,solver = "proximalpoint",verbose=FALSE,pos=TRUE,Normalize=TRUE,Norm.method = "frac",preprocess = "log",loss_his=FALSE,print_loss = FALSE, model_tracker=FALSE,model_name = NULL,X_int=FALSE, calibrate = TRUE){
     suppressPackageStartupMessages(require("scater"))
 	suppressPackageStartupMessages(require("preprocessCore"))
 	
@@ -574,4 +574,19 @@ SVT_RM_value <- function(Mat){
 	#Estimate t
 	t <- median(d)*omega
 	t
+}
+
+
+KappaScore <- function(X_array){
+   # first dim: gene
+   # second dim: sample
+   # third dim: cell type
+   dim = dim(X_array)
+   ks = 0
+   for(i in 1:dim[2]){
+   GEP <- X_array[,i,]
+   ks <- ks + kappa(GEP)
+   }
+   ks = ks / dim[2]
+   ks
 }
