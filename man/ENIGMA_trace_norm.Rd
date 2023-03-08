@@ -6,8 +6,7 @@
 \usage{
 ENIGMA_trace_norm(
   object,
-  theta,
-  R,
+  do_cpm = TRUE,
   alpha = 0.5,
   beta = 1,
   tao_k = 1,
@@ -32,6 +31,8 @@ ENIGMA_trace_norm(
 }
 \arguments{
 \item{object}{ENIGMA object}
+
+\item{do_cpm}{if perform cpm normalization to the data, strongly recommand to use to make sure each sample numerical value scale is comparable. Default = TRUE}
 
 \item{alpha}{ENIGMA is a multi-objective optimization problem involve two object function,
 the distance function between observed bulk RNA-seq and reconstitute RNA-seq

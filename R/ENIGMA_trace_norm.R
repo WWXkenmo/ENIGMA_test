@@ -3,6 +3,9 @@
 #' @description trace norm version is the alternative version of ENIGMA, which is the regularized weighted matrix completion to constraint the trace norm of inferred cell type-specific gene expression matrix.
 #' @param object ENIGMA object
 #'
+#' @param do_cpm
+#' if perform cpm normalization to the data, strongly recommand to use to make sure each sample numerical value scale is comparable. Default = TRUE
+#'
 #' @param alpha
 #' ENIGMA is a multi-objective optimization problem involve two object function,
 #' the distance function between observed bulk RNA-seq and reconstitute RNA-seq
@@ -19,7 +22,7 @@
 #' each others. The user need to tune this parameter based on the range of
 #' the singular value of the bulk RNA-seq matrix.
 #' Default: 1
-#' 
+#'
 #' @param tao_k
 #' step size for proximal point method. Default: 1
 #'
@@ -43,7 +46,7 @@
 #'
 #' @param max_ks
 #' The stop criteria for conditional number score (see Supplementary Notes for more details). Default: 1
-#' 
+#'
 #' @param verbose
 #' Whether return the information after each step of processing. Default: TRUE
 #'
@@ -58,7 +61,7 @@
 #'
 #' @param Norm.method
 #' Method used to perform normalization. User could choose PC, frac or quantile. Default: frac
-#' 
+#'
 #' @param preprocess
 #' Method used to perform variance stablization preprocessing. User could choose sqrt, log or none.sqrt: square root transformation; log: log2(*+1) transformation; none: no data transformation.
 #'
@@ -67,7 +70,7 @@
 #'
 #' @param model_tracker
 #' save the model in returned object
-#' 
+#'
 #' @param model_name
 #' name of the model
 #'
@@ -87,10 +90,14 @@
 #'
 #' @export
 #'
-ENIGMA_trace_norm <- function(object, theta, R, alpha=0.5,beta=1,tao_k=1,gamma=0.5,epsilon=0.001,epsilon_ks = 0.001,max_ks = 1, max.iter=1000,solver = "proximalpoint",verbose=FALSE,pos=TRUE,Normalize=TRUE,Norm.method = "frac",preprocess = "log",loss_his=FALSE,print_loss = FALSE, model_tracker=FALSE,model_name = NULL,X_int=NULL, calibrate = TRUE){
+ENIGMA_trace_norm <- function(object,do_cpm = TRUE,alpha=0.5,beta=1,tao_k=1,gamma=0.5,epsilon=0.001,epsilon_ks = 0.001,max_ks = 1, max.iter=1000,solver = "proximalpoint",verbose=FALSE,pos=TRUE,Normalize=TRUE,Norm.method = "frac",preprocess = "log",loss_his=FALSE,print_loss = FALSE, model_tracker=FALSE,model_name = NULL,X_int=NULL, calibrate = TRUE){
     suppressPackageStartupMessages(require("scater"))
 	suppressPackageStartupMessages(require("preprocessCore"))
-	
+
+	###Check do_cpm
+	if (do_cpm == FALSE){
+	  warnings("Please make sure each sample numerical value scale is similar")
+	}
 	###Create a model assay
 	if ( !(preprocess %in% c("none", "sqrt","log")) | (length(preprocess) != 1) ) {
         stop("Invalid data transformation method type. Please input 'none','sqrt' or 'log'. ")
@@ -101,7 +108,7 @@ ENIGMA_trace_norm <- function(object, theta, R, alpha=0.5,beta=1,tao_k=1,gamma=0
 	if ( !(solver %in% c("proximalpoint", "admm_fast","admm")) | (length(Norm.method) != 1) ) {
         stop("Invalid solver. Please input 'proximalpoint', 'admm_fast','admm'. ")
     }
-	
+
     theta = object@result_cell_proportion
     O = object@bulk
     R = object@ref
@@ -119,7 +126,7 @@ ENIGMA_trace_norm <- function(object, theta, R, alpha=0.5,beta=1,tao_k=1,gamma=0
 	rownames(O) <- rownames(R) <- geneID
 	colnames(O) <- sampleID
 	colnames(R) <- ctID
-	
+
 	if(preprocess == "log"){
 	 O <- log2(O+1)
 	 R <- log2(R+1)
@@ -128,9 +135,9 @@ ENIGMA_trace_norm <- function(object, theta, R, alpha=0.5,beta=1,tao_k=1,gamma=0
 	 O <- sqrt(O)
 	 R <- sqrt(R)
 	}
-	
+
 	rm(geneID,sampleID,ctID);gc()
-	
+
 	## ref kappa score
 	ref_kappa <- kappa(R)
 
@@ -173,16 +180,16 @@ ENIGMA_trace_norm <- function(object, theta, R, alpha=0.5,beta=1,tao_k=1,gamma=0
     Y_k_1 <- Y_k <- Y
     X_k_1 <- X_k <- X
     a <- as.matrix(rep(1/nrow(theta), nrow(theta)))
-    
+
 	if(is.null(epsilon)){
 	   z1  <- format(median(abs(O)), scientific=TRUE, digit=7)
        z2  <- substring(z1, 1, 8)
-       Power <- log( as.numeric( z1 ) / as.numeric( z2 ), 10 ) 
+       Power <- log( as.numeric( z1 ) / as.numeric( z2 ), 10 )
        epsilon <- 10^Power*(10^-4)
 	}
-	
+
 	if(is.null(gamma)){
-	   if(SVT_RM_value(O) < 1) gamma <- 2 
+	   if(SVT_RM_value(O) < 1) gamma <- 2
 	   if(SVT_RM_value(O) > 1) gamma <- 0.5
 	}
 
@@ -194,7 +201,7 @@ ENIGMA_trace_norm <- function(object, theta, R, alpha=0.5,beta=1,tao_k=1,gamma=0
 	  basic_infor = data.frame(alpha = alpha,beta = beta, gamma=gamma, epsilon = epsilon,max_iter = max.iter,calibrate = calibrate,Normalize_method = Norm.method,preprocess = preprocess,solver = solver,pos=pos)}
 	  object@model[[model_name]] <- list(basic_infor = basic_infor)
 	}
-	
+
     #calculate F matrix
 	if(solver == "admm_fast"){
     F = array(0,
@@ -208,7 +215,7 @@ ENIGMA_trace_norm <- function(object, theta, R, alpha=0.5,beta=1,tao_k=1,gamma=0
     for(i in 1:ncol(theta)){F[,,i] <- getF(theta[,i],alpha,gamma,a)}
 	}
     theta_hat <- colMeans(theta)
-    
+
     k <- 0
     delta <- delta_ks <- ks_new <- ks <- 10000
     loss <- NULL
@@ -219,7 +226,7 @@ ENIGMA_trace_norm <- function(object, theta, R, alpha=0.5,beta=1,tao_k=1,gamma=0
 	if(solver == "admm" || solver == "admm_fast"){
 	cat(paste('alpha: ',alpha, ' \n', 'beta: ',beta ,' \n','gamma: ',gamma ,' \n','epsilon: ',epsilon,' \n',sep=""))
 	}}
-	
+
 	writeLines(paste("Using ",solver," solver...",sep=""))
     repeat{
         cond1 <- abs(delta)<epsilon||k>max.iter
@@ -236,7 +243,7 @@ ENIGMA_trace_norm <- function(object, theta, R, alpha=0.5,beta=1,tao_k=1,gamma=0
 		Y_k <- Y_k_1
 		A_k <- A_k_1
         ks <- ks_new
-		
+
 		ratio <- NULL
 		loss <- NULL
 		##update X
@@ -245,7 +252,7 @@ ENIGMA_trace_norm <- function(object, theta, R, alpha=0.5,beta=1,tao_k=1,gamma=0
 			#a <- as.matrix(a.m[j,])
 			X_k_1[,,j] <- updated_X[,,j]*mask_entry
 			Y_k_1[,,j] <- SVT(((A_k[,,j]/gamma)+X_k_1[,,j]),(beta*theta_hat[j])/gamma)*mask_entry
-			
+
 			A_k_1[,,j] <- A_k[,,j] + gamma*(X_k_1[,,j]-Y_k_1[,,j])
 			ratio <- c(ratio, sum( (X_k_1[,,j]-X_k[,,j])^2 )/(nrow(X[,,j])*ncol(X[,,j])))
 		}
@@ -267,7 +274,7 @@ ENIGMA_trace_norm <- function(object, theta, R, alpha=0.5,beta=1,tao_k=1,gamma=0
 		delta_ks <- ks_new - ks
 		k <- k+1
 		}
-		
+
 		###################################
 		#using admm_fast solver
 		if(solver == "admm_fast"){
@@ -275,7 +282,7 @@ ENIGMA_trace_norm <- function(object, theta, R, alpha=0.5,beta=1,tao_k=1,gamma=0
 		Y_k <- Y_k_1
 		A_k <- A_k_1
         ks <- ks_new
-		
+
 	    ratio <- NULL
 		for(j in 1:ncol(theta)){
 			#a <- as.matrix(a.m[j,])
@@ -305,7 +312,7 @@ ENIGMA_trace_norm <- function(object, theta, R, alpha=0.5,beta=1,tao_k=1,gamma=0
 		delta_ks <- ks_new - ks
 		k <- k+1
 		}
-		
+
 		###################################
 		#using admm_fast solver
 		if(solver == "proximalpoint"){
@@ -313,14 +320,14 @@ ENIGMA_trace_norm <- function(object, theta, R, alpha=0.5,beta=1,tao_k=1,gamma=0
 		Y_k <- Y_k_1
 		A_k <- A_k_1
         ks <- ks_new
-		
+
 		ratio <- NULL
         dP <- derive_P(O, theta,X_k,R,alpha)
         for(j in 1:ncol(theta)){
             X_i <- X_k[,,j]- tao_k*dP[,,j]
             X_i <- SVT(X_i,tao_k*theta_hat[j]*beta)
             X_k_1[,,j] <- X_i*mask_entry
-            
+
             ratio <- c(ratio, sum( (X_k_1[,,j]-X_k[,,j])^2 )/(nrow(X[,,j])*ncol(X[,,j])))
         }
 		if(print_loss) r <- loss(O,X_k,theta,alpha,beta,R)
@@ -341,7 +348,7 @@ ENIGMA_trace_norm <- function(object, theta, R, alpha=0.5,beta=1,tao_k=1,gamma=0
 		delta_ks <- ks_new - ks
 		k <- k+1
 		}
-		
+
         }
     }
 	steps <- k
@@ -358,7 +365,7 @@ ENIGMA_trace_norm <- function(object, theta, R, alpha=0.5,beta=1,tao_k=1,gamma=0
 	}
 	}
 	X_k_m <- X_k
-	
+
 	if(Normalize){
 	writeLines("Normalization...")
 	X_k_norm <- X_k_m
@@ -387,7 +394,7 @@ ENIGMA_trace_norm <- function(object, theta, R, alpha=0.5,beta=1,tao_k=1,gamma=0
 		}
 	  }
 	}
-	
+
 	if(Norm.method == "frac"){
 		for(k in 1:dim(X_k_m)[3]){
 			exp <- X_k_m[,,k]
@@ -397,14 +404,14 @@ ENIGMA_trace_norm <- function(object, theta, R, alpha=0.5,beta=1,tao_k=1,gamma=0
 			X_k_norm[,,k] <- exp.norm
 		}
 	}
-	
-	
+
+
 	if(Norm.method == "quantile"){
 		 for(k in 1:dim(X_k_m)[3]){
 			X_k_norm[,,k] <- normalize.quantiles(X_k_norm[,,k])
 		 }
 	}
-	
+
 	###save
 	object@result_CSE_normalized = res2sce(X_k_norm)
 	if(model_tracker){
@@ -417,7 +424,7 @@ ENIGMA_trace_norm <- function(object, theta, R, alpha=0.5,beta=1,tao_k=1,gamma=0
 	}
 	}
 	rm(X_k_m);gc()
-	
+
 	writeLines( paste("Converge in ",steps," steps",sep="") )
 	# return cell type specific gene expression profile
 	object@result_CSE = res2sce(X_k)
@@ -430,7 +437,7 @@ ENIGMA_trace_norm <- function(object, theta, R, alpha=0.5,beta=1,tao_k=1,gamma=0
 	   object@model[[model_name]]$loss_his = NULL
 	   }
 	   object@model[[model_name]]$result_CSE = res2sce(X_k)
-	   
+
 	   ### import the model name and model type
 	   if(nrow(object@model_name)==0){
 	   m = t(as.matrix(c(model_name, "trace norm model")))
@@ -471,7 +478,7 @@ getX <- function(O,theta,R,A,Y,alpha,gamma){
     ## update X
     F = solve(alpha*t(theta_m)%*%theta_m+(1-alpha)*a%*%t(a)+gamma*diag(nrow(a)))
     X = (alpha*O%*%theta_m+(1-alpha)*R%*%t(a)-A_m+gamma*Y_m)%*%F
-    
+
     ## split X into CSE blocks
     X_k = array(0,
                 dim = c( nrow(O),
@@ -481,11 +488,11 @@ getX <- function(O,theta,R,A,Y,alpha,gamma){
                                  colnames(O),
                                  colnames(theta))
     )
-    
+
     for(i in 1:ncol(theta)){
         X_k[,,i] <- X[,((i-1)*ncol(O)+1):(i*ncol(O))]
     }
-    
+
     ##return
     X_k
 }
@@ -505,22 +512,22 @@ derive_P <- function(X, theta, P_old,R,alpha){
     )
     for(cell_type_index in 1:ncol(theta)){
         R.m <- as.matrix(R[,cell_type_index])
-        
+
         cell_type_seq <- c(1:ncol(theta))
         cell_type_seq <- cell_type_seq[cell_type_seq!=cell_type_index]
-        
+
         X_summary = Reduce("+",
                            lapply(cell_type_seq, function(i) P_old[,,i]%*%diag(theta[,i]) )
         )
         X_summary <- X-X_summary
-        
+
         dP1[,,cell_type_index] <- 2*(P_old[,,cell_type_index]%*%diag(theta[,cell_type_index]) - X_summary)%*%diag(theta[,cell_type_index])
         dP2[,,cell_type_index] <- 2*(as.matrix(rowMeans(P_old[,,cell_type_index]))-R.m)%*%t(as.matrix(rep((1/ncol(dP2[,,cell_type_index])),ncol(dP2[,,cell_type_index]))))
     }
-    
+
     w1 <- alpha
     w2 <- 1-w1
-    
+
     dP <- dP1*as.numeric(w1) + dP2*as.numeric(w2)
     return(dP)
 }
@@ -547,7 +554,7 @@ getT <- function(index,X,theta_m,O,alpha){
 
 SVT <- function(Mat,t){
 	require("corpcor")
-	
+
     svd <- fast.svd(Mat)
 	d <- svd$d
 	d <- d - t

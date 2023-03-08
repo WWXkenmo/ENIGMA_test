@@ -1,7 +1,7 @@
 #' @title Perform CTS-DEG analysis
 #'
 #' @description Analysis the differential expression genes for each cell type
-#' 
+#'
 #' @param object ENIGMA object
 #' @param FDR_control
 #' if use Wang et al., FDR controlled DEG analysis model. Default: TRUE
@@ -41,16 +41,16 @@ FindCSE_DEG <- function(object,y,FDR_control = TRUE,covariate=NULL,FoldChange = 
     DEG_list = list()
     if(FDR_control){result <- DEG_test(Exp,y,covariate)}else{result <- DEG_test2(Exp,y,covariate)}
     ES_m <- EffectiveSize(Exp,y,FoldChange)
-	
+
 	###
 	GeneSigTab = GeneSigTest(object,p_threshold = p_cutoff)
-	
+
     for(i in cellName){
         Tab_m <- cbind(ES_m[,i],result$pval[,i],result$qval[,i],GeneSigTab$call[,i],GeneSigTab$pval[,i])
         if(FoldChange){colnames(Tab_m) <- c("FoldChange","pvalue","qvalue","sig_gene","sig_gene_p")}else{
             colnames(Tab_m) <- c("ExpressionDifference","pvalue","qvalue","sig_gene","sig_gene_p")
         }
-		
+
 		Tab_m = as.data.frame(Tab_m)
 		Tab_m_sig = Tab_m[Tab_m$sig_gene == 1,]
 		Tab_m_nonsig = Tab_m[Tab_m$sig_gene == 0,]
@@ -150,7 +150,8 @@ pval2qval <- function (pval, A, y, covariate = NULL)
     return(qval)
 }
 
-
+## copyright: bMIND
+## https://github.com/randel/MIND
 test <- function (A, y, covariate = NULL)
 {
     if (dim(A)[3] != length(y))
@@ -216,7 +217,7 @@ DEG_test2 <- function(X_array,y,covariate=NULL){
             qval <- cbind(qval,q)
 	    }
     colnames(qval) <- colnames(pval) <- cellName
-    rownames(qval) <- rownames(pval) <- dimnames(X_array)[[1]]    
+    rownames(qval) <- rownames(pval) <- dimnames(X_array)[[1]]
     }
 
     return(list(qval = qval, pval = pval))

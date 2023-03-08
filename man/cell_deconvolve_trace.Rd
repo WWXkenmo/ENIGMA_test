@@ -19,9 +19,6 @@ cell_deconvolve_trace(
 \arguments{
 \item{verbose}{}
 }
-\value{
-
-}
 \description{
 Calculate the GEP of each cell types in bulk samples
 }
