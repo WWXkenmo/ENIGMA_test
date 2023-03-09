@@ -31,6 +31,7 @@ Imports:
   cowplot,
   Biobase,
   doParallel,
-  tibble
+  tibble,
+  e1071
 NeedsCompilation: no
 Packaged: 2021-12-24 02:25:09 UTC; WeiXu Wang
