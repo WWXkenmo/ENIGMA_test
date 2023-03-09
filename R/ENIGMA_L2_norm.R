@@ -70,7 +70,7 @@ ENIGMA_L2_max_norm <- function(object, do_cpm = TRUE,alpha=0.5, tao_k=0.01, beta
 
 	###Check do_cpm
 	if (do_cpm == FALSE){
-	  warnings("Please make sure each sample numerical value scale is similar")
+	  warning("Please make sure each sample numerical value scale is similar")
 	}
 	###Create a model assay
 	if(model_tracker){

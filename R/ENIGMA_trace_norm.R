@@ -96,7 +96,7 @@ ENIGMA_trace_norm <- function(object,do_cpm = TRUE,alpha=0.5,beta=1,tao_k=1,gamm
 
 	###Check do_cpm
 	if (do_cpm == FALSE){
-	  warnings("Please make sure each sample numerical value scale is similar")
+	  warning("Please make sure each sample numerical value scale is similar")
 	}
 	###Create a model assay
 	if ( !(preprocess %in% c("none", "sqrt","log")) | (length(preprocess) != 1) ) {
