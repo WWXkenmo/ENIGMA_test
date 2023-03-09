@@ -118,14 +118,16 @@ ENIGMA_trace_norm <- function(object,do_cpm = TRUE,alpha=0.5,beta=1,tao_k=1,gamm
     R = R[geneid,]
 
     ## renormalization
-	geneID <- rownames(O)
-	sampleID <- colnames(O)
-	ctID <- colnames(R)
-	O <- O %*% diag(10^5/colSums(O))
-	R <- R %*% diag(10^5/colSums(R))
-	rownames(O) <- rownames(R) <- geneID
-	colnames(O) <- sampleID
-	colnames(R) <- ctID
+    if (do_cpm){
+  	geneID <- rownames(O)
+  	sampleID <- colnames(O)
+  	ctID <- colnames(R)
+  	O <- O %*% diag(10^5/colSums(O))
+  	R <- R %*% diag(10^5/colSums(R))
+  	rownames(O) <- rownames(R) <- geneID
+  	colnames(O) <- sampleID
+  	colnames(R) <- ctID
+    }
 
 	if(preprocess == "log"){
 	 O <- log2(O+1)
